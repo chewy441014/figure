@@ -23,6 +23,9 @@ class DHChain:
     base_transform: np.ndarray = field(
         default_factory=lambda: np.eye(4, dtype=float)
     )
+    joint_rotations: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 3, 3), dtype=float)
+    )
 
     def __post_init__(self) -> None:
         if self.rows.ndim != 2 or self.rows.shape[1] != 4:

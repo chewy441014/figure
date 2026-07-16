@@ -1,88 +1,162 @@
 import sys
 
+import numpy as np
 import pygame
 from pygame.locals import DOUBLEBUF, OPENGL
-from OpenGL.GL import (
-    GL_COLOR_BUFFER_BIT,
-    GL_DEPTH_BUFFER_BIT,
-    GL_DEPTH_TEST,
-    GL_MODELVIEW,
-    GL_PROJECTION,
-    glClear,
-    glClearColor,
-    glEnable,
-    glLoadIdentity,
-    glMatrixMode,
-)
+from OpenGL.GL import *
 from OpenGL.GLU import gluLookAt, gluPerspective
 
-from src.model.default_pose import figure
+from src.model.default_pose import figure as default_figure
+from src.model.pose import create_pose
 from src.rendering.figure_engine import draw_figure
+from src.model.joint_limits import JOINT_LIMITS
 
 
 WINDOW_SIZE = (1024, 1024)
+ROTATION_SPEED = 1.5
+
+CHAIN_ORDER = [
+    "head",
+    "left_arm",
+    "right_arm",
+    "left_leg",
+    "right_leg",
+]
 
 
 def initialize() -> pygame.time.Clock:
-    """Create the window and configure OpenGL."""
-
     pygame.init()
     pygame.display.set_mode(WINDOW_SIZE, DOUBLEBUF | OPENGL)
     pygame.display.set_caption("Figure")
 
-    # Enable proper 3D depth ordering.
     glEnable(GL_DEPTH_TEST)
     glClearColor(0.08, 0.08, 0.10, 1.0)
 
-    # Configure the perspective camera lens.
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    gluPerspective(
-        45.0,
-        WINDOW_SIZE[0] / WINDOW_SIZE[1],
-        1.0,
-        1000.0,
-    )
+    gluPerspective(45.0, 1.0, 1.0, 1000.0)
 
     return pygame.time.Clock()
 
 
 def set_camera() -> None:
-    """View the figure from the front with world +Z upward."""
-
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
 
     gluLookAt(
-        0.0, -300.0, -50.0,  # Camera position
-        0.0,    0.0, -50.0,  # Camera target
-        0.0,    0.0,   1.0,  # Up direction
+        0.0, -300.0, -50.0,
+        0.0, 0.0, -50.0,
+        0.0, 0.0, 1.0,
+    )
+
+
+def create_rotation_state() -> dict[str, np.ndarray]:
+    """Create one XYZ rotation vector per DH row."""
+
+    return {
+        name: np.zeros((len(getattr(default_figure, name).rows), 3))
+        for name in CHAIN_ORDER
+    }
+
+
+def rotate_active_joint(
+    rotations: dict[str, np.ndarray],
+    chain_name: str,
+    joint_index: int,
+    delta_time: float,
+) -> None:
+    """Rotate and constrain the selected joint."""
+
+    angles = rotations[chain_name][joint_index]
+    keys = pygame.key.get_pressed()
+    amount = ROTATION_SPEED * delta_time
+
+    limits = JOINT_LIMITS.get(chain_name, [])
+
+    # Frames without explicit constraints remain fixed.
+    if joint_index >= len(limits):
+        return
+
+    joint = limits[joint_index]
+    enabled = np.asarray(joint["enabled"], dtype=bool)
+
+    changes = np.array([
+        keys[pygame.K_q] - keys[pygame.K_a],
+        keys[pygame.K_w] - keys[pygame.K_s],
+        keys[pygame.K_e] - keys[pygame.K_d],
+    ], dtype=float)
+
+    angles += changes * amount * enabled
+
+    if keys[pygame.K_r]:
+        angles[:] = 0.0
+
+    angles[:] = np.clip(
+        angles,
+        joint["minimum"],
+        joint["maximum"],
+    )
+
+
+def update_caption(chain_name: str, joint_index: int) -> None:
+    pygame.display.set_caption(
+        f"Figure | {chain_name} | joint {joint_index}"
     )
 
 
 def run() -> None:
-    """Run the rendering loop."""
-
     clock = initialize()
+    rotations = create_rotation_state()
+
+    chain_index = 0
+    joint_index = 0
     running = True
 
+    update_caption(CHAIN_ORDER[chain_index], joint_index)
+
     while running:
-        # Process window and keyboard events.
+        delta_time = clock.tick(60) / 1000.0
+        chain_name = CHAIN_ORDER[chain_index]
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
 
-        # Clear the previous frame.
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+                # Tab selects the next body chain.
+                elif event.key == pygame.K_TAB:
+                    chain_index = (chain_index + 1) % len(CHAIN_ORDER)
+                    chain_name = CHAIN_ORDER[chain_index]
+                    joint_index = 0
 
+                # Number keys select joints 0–5.
+                elif pygame.K_0 <= event.key <= pygame.K_5:
+                    requested = event.key - pygame.K_0
+                    maximum = len(rotations[chain_name]) - 1
+                    joint_index = min(requested, maximum)
+
+                # Backspace resets every joint.
+                elif event.key == pygame.K_BACKSPACE:
+                    rotations = create_rotation_state()
+
+                update_caption(chain_name, joint_index)
+
+        rotate_active_joint(
+            rotations,
+            chain_name,
+            joint_index,
+            delta_time,
+        )
+
+        figure = create_pose(default_figure, rotations)
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         set_camera()
         draw_figure(figure)
-
         pygame.display.flip()
-        clock.tick(60)
 
     pygame.quit()
     sys.exit()

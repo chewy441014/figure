@@ -67,31 +67,53 @@ def dh_transform(
     )
 
 
+def rotation_transform(rotation: np.ndarray) -> np.ndarray:
+    """Convert a 3x3 rotation matrix into a 4x4 transform."""
+
+    transform = np.eye(4, dtype=float)
+    transform[:3, :3] = rotation
+    return transform
+
+
 def chain_transforms(
     chain: DHChain,
     parent_position: Iterable[float],
 ) -> list[np.ndarray]:
-    """
-    Calculate every coordinate frame in a DH chain.
-
-    The parent torso point places the chain in figure coordinates.
-    The chain base transform then aims its local Z axis.
-    """
+    """Calculate every coordinate frame in a kinematic chain."""
 
     parent_transform = translation_matrix(parent_position)
-
     current_transform = parent_transform @ chain.base_transform
 
-    # Include the chain's initial frame before applying DH rows.
     transforms = [current_transform.copy()]
 
-    for row in chain.rows:
+    # Default to identity rotations for an unposed chain.
+    if len(chain.joints) == 0:
+        joint_rotations = np.repeat(
+            np.eye(3, dtype=float)[None, :, :],
+            len(chain.rows),
+            axis=0,
+        )
+    else:
+        joint_rotations = chain.joints
+
+    if joint_rotations.shape != (len(chain.rows), 3, 3):
+        raise ValueError(
+            f"{chain.name}: expected joint rotations with shape "
+            f"({len(chain.rows)}, 3, 3), got {joint_rotations.shape}."
+        )
+
+    for row, joint_rotation in zip(chain.rows, joint_rotations):
         if np.isnan(row).any():
             raise ValueError(
                 f"DH chain '{chain.name}' contains undefined values."
             )
 
-        current_transform = current_transform @ dh_transform(*row)
+        current_transform = (
+            current_transform
+            @ rotation_transform(joint_rotation)
+            @ dh_transform(*row)
+        )
+
         transforms.append(current_transform.copy())
 
     return transforms
