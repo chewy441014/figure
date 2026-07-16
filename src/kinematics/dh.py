@@ -143,7 +143,7 @@ def figure_joint_positions(
     Head and limb positions come from DH forward kinematics.
     """
 
-    torso = figure.torso.as_dict()
+    torso = posed_torso_points(figure)
 
     return {
         "head": joint_positions(
@@ -196,15 +196,74 @@ def torso_segments(
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Return the fixed torso lines used for initial rendering."""
 
-    torso = figure.torso
+    torso = posed_torso_points(figure)
 
     return [
-        (torso.left_shoulder, torso.neck_base),
-        (torso.neck_base, torso.right_shoulder),
-        (torso.neck_base, torso.spine_upper),
-        (torso.spine_upper, torso.spine_mid_upper),
-        (torso.spine_mid_upper, torso.spine_mid_lower),
-        (torso.spine_mid_lower, torso.spine_lower),
-        (torso.spine_lower, torso.left_hip),
-        (torso.spine_lower, torso.right_hip),
+        (torso["left_shoulder"], torso["neck_base"]),
+        (torso["neck_base"], torso["right_shoulder"]),
+        (torso["neck_base"], torso["spine_upper"]),
+        (torso["spine_upper"], torso["spine_mid_upper"]),
+        (torso["spine_mid_upper"], torso["spine_mid_lower"]),
+        (torso["spine_mid_lower"], torso["spine_lower"]),
+        (torso["spine_lower"], torso["left_hip"]),
+        (torso["spine_lower"], torso["right_hip"]),
     ]
+
+
+def posed_torso_points(figure: FigureModel) -> dict[str, np.ndarray]:
+    """Apply hierarchical rotations through the spine."""
+
+    torso = figure.torso.as_dict()
+
+    names = [
+        "spine_lower",
+        "spine_mid_lower",
+        "spine_mid_upper",
+        "spine_upper",
+        "neck_base",
+    ]
+
+    posed = {
+        name: point.copy()
+        for name, point in torso.items()
+    }
+
+    current_position = torso["spine_lower"].copy()
+    current_rotation = np.eye(3, dtype=float)
+
+    posed["spine_lower"] = current_position
+
+    # Each rotation affects all following spine segments.
+    for index in range(4):
+        current_rotation = (
+            current_rotation @ figure.spine_joints[index]
+        )
+
+        original_offset = (
+            torso[names[index + 1]]
+            - torso[names[index]]
+        )
+
+        current_position = (
+            current_position
+            + current_rotation @ original_offset
+        )
+
+        posed[names[index + 1]] = current_position.copy()
+
+    # Shoulders remain attached relative to the neck frame.
+    neck = posed["neck_base"]
+
+    posed["left_shoulder"] = (
+        neck
+        + current_rotation
+        @ (torso["left_shoulder"] - torso["neck_base"])
+    )
+
+    posed["right_shoulder"] = (
+        neck
+        + current_rotation
+        @ (torso["right_shoulder"] - torso["neck_base"])
+    )
+
+    return posed

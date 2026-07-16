@@ -8,7 +8,7 @@ from OpenGL.GLU import gluLookAt, gluPerspective
 
 from src.model.default_pose import figure as default_figure
 from src.model.pose import create_pose
-from src.rendering.figure_engine import draw_figure
+from src.rendering.figure_engine import draw_figure, draw_figure_frames
 from src.model.joint_limits import JOINT_LIMITS
 
 
@@ -16,6 +16,7 @@ WINDOW_SIZE = (1024, 1024)
 ROTATION_SPEED = 1.5
 
 CHAIN_ORDER = [
+    "spine",
     "head",
     "left_arm",
     "right_arm",
@@ -51,12 +52,16 @@ def set_camera() -> None:
 
 
 def create_rotation_state() -> dict[str, np.ndarray]:
-    """Create one XYZ rotation vector per DH row."""
+    """Create editable XYZ angles for every joint."""
 
-    return {
+    rotations = {
         name: np.zeros((len(getattr(default_figure, name).rows), 3))
         for name in CHAIN_ORDER
+        if name != "spine"
     }
+
+    rotations["spine"] = np.zeros((4, 3), dtype=float)
+    return rotations
 
 
 def rotate_active_joint(
@@ -65,10 +70,10 @@ def rotate_active_joint(
     joint_index: int,
     delta_time: float,
 ) -> None:
-    """Rotate and constrain the selected joint."""
+    """Rotate the selected joint freely around local XYZ axes."""
 
-    angles = rotations[chain_name][joint_index]
     keys = pygame.key.get_pressed()
+    angles = rotations[chain_name][joint_index]
     amount = ROTATION_SPEED * delta_time
 
     limits = JOINT_LIMITS.get(chain_name, [])
@@ -76,7 +81,7 @@ def rotate_active_joint(
     # Frames without explicit constraints remain fixed.
     if joint_index >= len(limits):
         return
-
+    
     joint = limits[joint_index]
     enabled = np.asarray(joint["enabled"], dtype=bool)
 
@@ -98,6 +103,31 @@ def rotate_active_joint(
     )
 
 
+def update_spine(
+    spine_angles: np.ndarray,
+    delta_time: float,
+) -> None:
+    """Twist the spine around local Z."""
+
+    keys = pygame.key.get_pressed()
+    amount = ROTATION_SPEED * delta_time
+
+    if keys[pygame.K_t]:
+        spine_angles[2] += amount
+
+    if keys[pygame.K_g]:
+        spine_angles[2] -= amount
+
+    if keys[pygame.K_y]:
+        spine_angles[:] = 0.0
+
+    spine_angles[2] = np.clip(
+        spine_angles[2],
+        np.radians(-60.0),
+        np.radians(60.0),
+    )
+
+
 def update_caption(chain_name: str, joint_index: int) -> None:
     pygame.display.set_caption(
         f"Figure | {chain_name} | joint {joint_index}"
@@ -107,7 +137,7 @@ def update_caption(chain_name: str, joint_index: int) -> None:
 def run() -> None:
     clock = initialize()
     rotations = create_rotation_state()
-
+    spine_angles = np.zeros(3, dtype=float)
     chain_index = 0
     joint_index = 0
     running = True
@@ -151,11 +181,22 @@ def run() -> None:
             delta_time,
         )
 
-        figure = create_pose(default_figure, rotations)
+        update_spine(spine_angles, delta_time)
+
+        figure = create_pose(
+            default_figure,
+            {
+                name: values
+                for name, values in rotations.items()
+                if name != "spine"
+            },
+            spine=rotations["spine"],
+        )
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         set_camera()
         draw_figure(figure)
+        draw_figure_frames(figure)
         pygame.display.flip()
 
     pygame.quit()

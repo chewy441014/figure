@@ -41,19 +41,9 @@ def rotation_xyz(angles: Sequence[float]) -> np.ndarray:
 def create_pose(
     base_figure: FigureModel,
     rotations: dict[str, Sequence[Sequence[float]]],
+    spine: Sequence[Sequence[float]] | None = None,
 ) -> FigureModel:
-    """
-    Return an independent figure with local joint rotations.
-
-    Structure:
-        {
-            "left_arm": [
-                [x, y, z],  # shoulder
-                [x, y, z],  # elbow
-                ...
-            ]
-        }
-    """
+    """Return an independent posed figure."""
 
     posed = deepcopy(base_figure)
 
@@ -62,11 +52,20 @@ def create_pose(
 
         if len(joint_angles) != len(chain.rows):
             raise ValueError(
-                f"{chain_name} requires {len(chain.rows)} joint rotations."
+                f"{chain_name} requires {len(chain.rows)} rotations."
             )
 
         chain.joints = np.array(
             [rotation_xyz(angles) for angles in joint_angles],
+            dtype=float,
+        )
+
+    if spine is not None:
+        if len(spine) != 4:
+            raise ValueError("Spine requires four joint rotations.")
+
+        posed.spine_joints = np.array(
+            [rotation_xyz(angles) for angles in spine],
             dtype=float,
         )
 
