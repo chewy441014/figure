@@ -87,14 +87,14 @@ def chain_transforms(
     transforms = [current_transform.copy()]
 
     # Default to identity rotations for an unposed chain.
-    if len(chain.joints) == 0:
+    if len(chain.joint_rotations) == 0:
         joint_rotations = np.repeat(
             np.eye(3, dtype=float)[None, :, :],
             len(chain.rows),
             axis=0,
         )
     else:
-        joint_rotations = chain.joints
+        joint_rotations = chain.joint_rotations
 
     if joint_rotations.shape != (len(chain.rows), 3, 3):
         raise ValueError(

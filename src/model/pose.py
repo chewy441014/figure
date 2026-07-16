@@ -55,7 +55,7 @@ def create_pose(
                 f"{chain_name} requires {len(chain.rows)} rotations."
             )
 
-        chain.joints = np.array(
+        chain.joint_rotations = np.array(
             [rotation_xyz(angles) for angles in joint_angles],
             dtype=float,
         )

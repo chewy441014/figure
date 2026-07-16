@@ -6,7 +6,7 @@ from ..kinematics.dh import figure_joint_positions, torso_segments, chain_transf
 from ..model.skeleton import FigureModel
 from .primitives import draw_chain, draw_cylinder, draw_sphere
 from .debug import draw_chain_frames, draw_frame_axes
-from OpenGL.GL import glColor3f
+from OpenGL.GL import glColor4f
 
 
 def draw_torso(
@@ -29,9 +29,12 @@ def draw_figure(
     figure: FigureModel,
     joint_radius: float = 3.0,
     link_radius: float = 2.0,
+    alpha: float = 1.0,
 ) -> None:
-    """Draw the torso and all articulated chains."""
-    glColor3f(1.0, 1.0, 1.0)
+    """Draw the complete articulated skeleton."""
+
+    glColor4f(1.0, 1.0, 1.0, alpha)
+
     draw_torso(
         figure,
         joint_radius=joint_radius,

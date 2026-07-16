@@ -1,5 +1,7 @@
 import sys
 
+from dataclasses import dataclass
+
 import numpy as np
 import pygame
 from pygame.locals import DOUBLEBUF, OPENGL
@@ -31,22 +33,128 @@ def initialize() -> pygame.time.Clock:
     pygame.display.set_caption("Figure")
 
     glEnable(GL_DEPTH_TEST)
+    # Enable lighting and allow glColor calls to set material color.
+    glEnable(GL_LIGHTING)
+    glEnable(GL_LIGHT0)
+    glEnable(GL_COLOR_MATERIAL)
+
+    glColorMaterial(
+        GL_FRONT_AND_BACK,
+        GL_AMBIENT_AND_DIFFUSE,
+    )
+
+    # Directional light positioned above and in front.
+    glLightfv(
+        GL_LIGHT0,
+        GL_POSITION,
+        (100.0, -150.0, 200.0, 0.0),
+    )
+
+    glLightfv(
+        GL_LIGHT0,
+        GL_AMBIENT,
+        (0.20, 0.20, 0.20, 1.0),
+    )
+
+    glLightfv(
+        GL_LIGHT0,
+        GL_DIFFUSE,
+        (0.85, 0.85, 0.85, 1.0),
+    )
+
+    glLightfv(
+        GL_LIGHT0,
+        GL_SPECULAR,
+        (0.40, 0.40, 0.40, 1.0),
+    )
+
+    glMaterialf(
+        GL_FRONT_AND_BACK,
+        GL_SHININESS,
+        32.0,
+    )
     glClearColor(0.08, 0.08, 0.10, 1.0)
 
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
     gluPerspective(45.0, 1.0, 1.0, 1000.0)
 
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
     return pygame.time.Clock()
 
 
-def set_camera() -> None:
+@dataclass
+class Camera:
+    yaw: float = 0.0
+    pitch: float = 0.0
+    distance: float = 300.0
+    target: np.ndarray = None
+
+    def __post_init__(self) -> None:
+        if self.target is None:
+            self.target = np.array([0.0, 0.0, -60.0], dtype=float)
+
+
+def update_camera(camera: Camera, delta_time: float) -> None:
+    """Orbit, pan, and zoom the camera."""
+
+    keys = pygame.key.get_pressed()
+
+    orbit_speed = 0.5 * delta_time
+    pan_speed = 25.0 * delta_time
+    zoom_speed = 60.0 * delta_time
+
+    # Arrow keys: orbit.
+    camera.yaw += orbit_speed * (
+        keys[pygame.K_RIGHT] - keys[pygame.K_LEFT]
+    )
+
+    camera.pitch += orbit_speed * (
+        keys[pygame.K_UP] - keys[pygame.K_DOWN]
+    )
+
+    camera.pitch = np.clip(
+        camera.pitch,
+        np.radians(-85.0),
+        np.radians(85.0),
+    )
+
+    # I/K: vertical pan.
+    camera.target[2] += pan_speed * (
+        keys[pygame.K_i] - keys[pygame.K_k]
+    )
+
+    # J/L: horizontal pan.
+    camera.target[0] += pan_speed * (
+        keys[pygame.K_l] - keys[pygame.K_j]
+    )
+
+    # U/O: zoom.
+    camera.distance += zoom_speed * (
+        keys[pygame.K_o] - keys[pygame.K_u]
+    )
+
+    camera.distance = np.clip(camera.distance, 80.0, 1000.0)
+
+
+def set_camera(camera: Camera) -> None:
+    """Apply the camera view transform."""
+
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
+    horizontal = camera.distance * np.cos(camera.pitch)
+
+    position = camera.target + np.array([
+        horizontal * np.sin(camera.yaw),
+        -horizontal * np.cos(camera.yaw),
+        camera.distance * np.sin(camera.pitch),
+    ])
 
     gluLookAt(
-        0.0, -300.0, -50.0,
-        0.0, 0.0, -50.0,
+        *position,
+        *camera.target,
         0.0, 0.0, 1.0,
     )
 
@@ -141,6 +249,8 @@ def run() -> None:
     chain_index = 0
     joint_index = 0
     running = True
+    skeleton_transparent = False
+    camera = Camera()
 
     update_caption(CHAIN_ORDER[chain_index], joint_index)
 
@@ -155,6 +265,8 @@ def run() -> None:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.key == pygame.K_x:
+                    skeleton_transparent = not skeleton_transparent
 
                 # Tab selects the next body chain.
                 elif event.key == pygame.K_TAB:
@@ -173,6 +285,8 @@ def run() -> None:
                     rotations = create_rotation_state()
 
                 update_caption(chain_name, joint_index)
+
+        update_camera(camera, delta_time)
 
         rotate_active_joint(
             rotations,
@@ -194,9 +308,16 @@ def run() -> None:
         )
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        set_camera()
-        draw_figure(figure)
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        set_camera(camera)
+        
+        draw_figure(
+            figure,
+            alpha=0.25 if skeleton_transparent else 1.0,
+        )
         draw_figure_frames(figure)
+        
         pygame.display.flip()
 
     pygame.quit()

@@ -3,10 +3,14 @@ from __future__ import annotations
 import numpy as np
 from OpenGL.GL import (
     GL_LINES,
+    GL_LIGHTING,
     glBegin,
     glColor3f,
     glEnd,
     glVertex3f,
+    glDisable,
+    glEnable,
+    glIsEnabled,
 )
 
 
@@ -14,33 +18,40 @@ def draw_frame_axes(
     transform: np.ndarray,
     length: float = 8.0,
 ) -> None:
-    """Draw local XYZ axes from a 4×4 transform."""
+    """Draw unlit local XYZ axes."""
+
+    lighting_enabled = glIsEnabled(GL_LIGHTING)
+
+    if lighting_enabled:
+        glDisable(GL_LIGHTING)
 
     origin = transform[:3, 3]
     rotation = transform[:3, :3]
 
-    x_end = origin + rotation[:, 0] * length
-    y_end = origin + rotation[:, 1] * length
-    z_end = origin + rotation[:, 2] * length
+    endpoints = [
+        origin + rotation[:, 0] * length,
+        origin + rotation[:, 1] * length,
+        origin + rotation[:, 2] * length,
+    ]
 
     glBegin(GL_LINES)
 
-    # X axis: red
     glColor3f(1.0, 0.0, 0.0)
     glVertex3f(*origin)
-    glVertex3f(*x_end)
+    glVertex3f(*endpoints[0])
 
-    # Y axis: green
     glColor3f(0.0, 1.0, 0.0)
     glVertex3f(*origin)
-    glVertex3f(*y_end)
+    glVertex3f(*endpoints[1])
 
-    # Z axis: blue
     glColor3f(0.0, 0.0, 1.0)
     glVertex3f(*origin)
-    glVertex3f(*z_end)
+    glVertex3f(*endpoints[2])
 
     glEnd()
+
+    if lighting_enabled:
+        glEnable(GL_LIGHTING)
 
 
 def draw_chain_frames(

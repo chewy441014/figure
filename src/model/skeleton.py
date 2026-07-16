@@ -66,6 +66,14 @@ class FigureModel:
     left_leg: DHChain
     right_leg: DHChain
 
+    spine_joints: np.ndarray = field(
+    default_factory=lambda: np.repeat(
+        np.eye(3, dtype=float)[None, :, :],
+        4,
+        axis=0,
+    )
+)
+
     world_origin: np.ndarray = field(
         default_factory=lambda: np.zeros(3, dtype=float)
     )
@@ -112,4 +120,5 @@ def create_default_figure() -> FigureModel:
 
         left_leg=empty_chain("left_leg", 6, "left_hip"),
         right_leg=empty_chain("right_leg", 6, "right_hip"),
+        
     )
