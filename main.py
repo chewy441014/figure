@@ -12,6 +12,8 @@ from src.model.default_pose import figure as default_figure
 from src.model.pose import create_pose
 from src.rendering.figure_engine import draw_figure, draw_figure_frames
 from src.model.joint_limits import JOINT_LIMITS
+from src.model.serialization import load_scene, save_scene
+from src.ui.settings_menu import AppSettings, SettingsMenu, MenuAction
 
 
 WINDOW_SIZE = (1024, 1024)
@@ -251,6 +253,10 @@ def run() -> None:
     running = True
     skeleton_transparent = False
     camera = Camera()
+    show_debug_frames = True
+    scene_path = "pose.json"
+    settings = AppSettings()
+    settings_menu = SettingsMenu()
 
     update_caption(CHAIN_ORDER[chain_index], joint_index)
 
@@ -263,10 +269,38 @@ def run() -> None:
                 running = False
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+                action = settings_menu.handle_event(event, settings)
+                if action == MenuAction.QUIT:
                     running = False
+                    continue
+                if action == MenuAction.START_VERIFICATION:
+                    # To do
+                    continue
+                if settings_menu.visible or (action == MenuAction.NONE):
+                    continue
                 elif event.key == pygame.K_x:
                     skeleton_transparent = not skeleton_transparent
+                elif event.key == pygame.K_F5:
+                    save_scene(
+                        scene_path,
+                        rotations,
+                        camera,
+                        skeleton_transparent=skeleton_transparent,
+                        show_debug_frames=show_debug_frames,
+                    )
+
+                elif event.key == pygame.K_F9:
+                    (
+                        skeleton_transparent,
+                        show_debug_frames,
+                    ) = load_scene(
+                        scene_path,
+                        rotations,
+                        camera,
+                    )
+
+                elif event.key == pygame.K_f:
+                    show_debug_frames = not show_debug_frames
 
                 # Tab selects the next body chain.
                 elif event.key == pygame.K_TAB:
@@ -286,26 +320,27 @@ def run() -> None:
 
                 update_caption(chain_name, joint_index)
 
-        update_camera(camera, delta_time)
+        if not settings_menu.visible:
+            update_camera(camera, delta_time)
 
-        rotate_active_joint(
-            rotations,
-            chain_name,
-            joint_index,
-            delta_time,
-        )
+            rotate_active_joint(
+                rotations,
+                chain_name,
+                joint_index,
+                delta_time,
+            )
 
-        update_spine(spine_angles, delta_time)
+            update_spine(spine_angles, delta_time)
 
-        figure = create_pose(
-            default_figure,
-            {
-                name: values
-                for name, values in rotations.items()
-                if name != "spine"
-            },
-            spine=rotations["spine"],
-        )
+            figure = create_pose(
+                default_figure,
+                {
+                    name: values
+                    for name, values in rotations.items()
+                    if name != "spine"
+                },
+                spine=rotations["spine"],
+            )
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glMatrixMode(GL_MODELVIEW)
@@ -314,9 +349,14 @@ def run() -> None:
         
         draw_figure(
             figure,
-            alpha=0.25 if skeleton_transparent else 1.0,
+            alpha=0.25 if settings.skeleton_transparent else 1.0,
+            show_joints=settings.show_joint_spheres,
         )
-        draw_figure_frames(figure)
+
+        if settings.show_debug_frames:
+            draw_figure_frames(figure)
+
+        settings_menu.draw(settings, WINDOW_SIZE)
         
         pygame.display.flip()
 

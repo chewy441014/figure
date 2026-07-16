@@ -19,13 +19,13 @@ from .mesh import Mesh, cylinder_mesh, sphere_mesh
 
 # Reuse one cylinder mesh instead of rebuilding geometry each frame.
 CYLINDER_MESH: Mesh = cylinder_mesh(
-    segments=24,
+    segments=2,
     capped=True,
 )
 
-SPHERE_MESH: Mesh = sphere_mesh(
-    slices=24,
-    stacks=16,
+SPHERE_MESH = sphere_mesh(
+    slices=2,
+    stacks=8,
 )
 
 

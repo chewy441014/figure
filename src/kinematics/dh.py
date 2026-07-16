@@ -16,55 +16,55 @@ def translation_matrix(position: Iterable[float]) -> np.ndarray:
 
 
 def dh_transform(
-    theta: float,
-    d: float,
-    a: float,
-    alpha: float,
-) -> np.ndarray:
-    """
-    Create one standard Denavit-Hartenberg transform.
+        theta: float,
+        d: float,
+        a: float,
+        alpha: float,
+    ) -> np.ndarray:
+        """
+        Create one standard Denavit-Hartenberg transform.
 
-    Parameter order:
-        theta: rotation about local Z
-        d: translation along local Z
-        a: translation along the new X
-        alpha: rotation about the new X
-    """
+        Parameter order:
+            theta: rotation about local Z
+            d: translation along local Z
+            a: translation along the new X
+            alpha: rotation about the new X
+        """
 
-    cos_theta = np.cos(theta)
-    sin_theta = np.sin(theta)
-    cos_alpha = np.cos(alpha)
-    sin_alpha = np.sin(alpha)
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
+        cos_alpha = np.cos(alpha)
+        sin_alpha = np.sin(alpha)
 
-    return np.array(
-        [
+        return np.array(
             [
-                cos_theta,
-                -sin_theta * cos_alpha,
-                sin_theta * sin_alpha,
-                a * cos_theta,
+                [
+                    cos_theta,
+                    -sin_theta * cos_alpha,
+                    sin_theta * sin_alpha,
+                    a * cos_theta,
+                ],
+                [
+                    sin_theta,
+                    cos_theta * cos_alpha,
+                    -cos_theta * sin_alpha,
+                    a * sin_theta,
+                ],
+                [
+                    0.0,
+                    sin_alpha,
+                    cos_alpha,
+                    d,
+                ],
+                [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ],
             ],
-            [
-                sin_theta,
-                cos_theta * cos_alpha,
-                -cos_theta * sin_alpha,
-                a * sin_theta,
-            ],
-            [
-                0.0,
-                sin_alpha,
-                cos_alpha,
-                d,
-            ],
-            [
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-            ],
-        ],
-        dtype=float,
-    )
+            dtype=float,
+        )
 
 
 def rotation_transform(rotation: np.ndarray) -> np.ndarray:
@@ -76,139 +76,159 @@ def rotation_transform(rotation: np.ndarray) -> np.ndarray:
 
 
 def chain_transforms(
-    chain: DHChain,
-    parent_position: Iterable[float],
-) -> list[np.ndarray]:
-    """Calculate every coordinate frame in a kinematic chain."""
+        chain: DHChain,
+        parent_position: Iterable[float],
+        parent_rotation: np.ndarray | None = None,
+    ) -> list[np.ndarray]:
+        """Calculate frames relative to a positioned and oriented parent."""
 
-    parent_transform = translation_matrix(parent_position)
-    current_transform = parent_transform @ chain.base_transform
+        parent_transform = translation_matrix(parent_position)
 
-    transforms = [current_transform.copy()]
+        if parent_rotation is not None:
+            parent_transform[:3, :3] = parent_rotation
 
-    # Default to identity rotations for an unposed chain.
-    if len(chain.joint_rotations) == 0:
-        joint_rotations = np.repeat(
-            np.eye(3, dtype=float)[None, :, :],
-            len(chain.rows),
-            axis=0,
-        )
-    else:
-        joint_rotations = chain.joint_rotations
+        current_transform = parent_transform @ chain.base_transform
+        transforms = [current_transform.copy()]
 
-    if joint_rotations.shape != (len(chain.rows), 3, 3):
-        raise ValueError(
-            f"{chain.name}: expected joint rotations with shape "
-            f"({len(chain.rows)}, 3, 3), got {joint_rotations.shape}."
-        )
+        if len(chain.joint_rotations) == 0:
+            joint_rotations = np.repeat(
+                np.eye(3, dtype=float)[None, :, :],
+                len(chain.rows),
+                axis=0,
+            )
+        else:
+            joint_rotations = chain.joint_rotations
 
-    for row, joint_rotation in zip(chain.rows, joint_rotations):
-        if np.isnan(row).any():
+        if joint_rotations.shape != (len(chain.rows), 3, 3):
             raise ValueError(
-                f"DH chain '{chain.name}' contains undefined values."
+                f"{chain.name}: expected joint rotations with shape "
+                f"({len(chain.rows)}, 3, 3), got {joint_rotations.shape}."
             )
 
-        current_transform = (
-            current_transform
-            @ rotation_transform(joint_rotation)
-            @ dh_transform(*row)
-        )
+        for row, joint_rotation in zip(chain.rows, joint_rotations):
+            if np.isnan(row).any():
+                raise ValueError(
+                    f"DH chain '{chain.name}' contains undefined values."
+                )
 
-        transforms.append(current_transform.copy())
+            current_transform = (
+                current_transform
+                @ rotation_transform(joint_rotation)
+                @ dh_transform(*row)
+            )
 
-    return transforms
+            transforms.append(current_transform.copy())
+
+        return transforms
 
 
 def joint_positions(
-    chain: DHChain,
-    parent_position: Iterable[float],
-) -> np.ndarray:
-    """Return one XYZ position for every frame in the chain."""
+        chain: DHChain,
+        parent_position: Iterable[float],
+    ) -> np.ndarray:
+        """Return one XYZ position for every frame in the chain."""
 
-    transforms = chain_transforms(chain, parent_position)
+        transforms = chain_transforms(chain, parent_position)
 
-    return np.array(
-        [transform[:3, 3] for transform in transforms],
-        dtype=float,
-    )
+        return np.array(
+            [transform[:3, 3] for transform in transforms],
+            dtype=float,
+        )
 
 
 def figure_joint_positions(
-    figure: FigureModel,
-) -> dict[str, np.ndarray]:
-    """
-    Calculate all articulated joint positions.
+        figure: FigureModel,
+    ) -> dict[str, np.ndarray]:
+        """Calculate articulated joint positions."""
 
-    Torso points remain fixed landmarks.
-    Head and limb positions come from DH forward kinematics.
-    """
+        torso = posed_torso_points(figure)
+        orientations = torso_attachment_rotations(figure)
 
-    torso = posed_torso_points(figure)
+        positions = {}
 
-    return {
-        "head": joint_positions(
-            figure.head,
-            torso[figure.head.parent_point],
-        ),
-        "left_arm": joint_positions(
-            figure.left_arm,
-            torso[figure.left_arm.parent_point],
-        ),
-        "right_arm": joint_positions(
-            figure.right_arm,
-            torso[figure.right_arm.parent_point],
-        ),
-        "left_leg": joint_positions(
-            figure.left_leg,
-            torso[figure.left_leg.parent_point],
-        ),
-        "right_leg": joint_positions(
-            figure.right_leg,
-            torso[figure.right_leg.parent_point],
-        ),
-    }
+        for chain_name in (
+            "head",
+            "left_arm",
+            "right_arm",
+            "left_leg",
+            "right_leg",
+        ):
+            chain = getattr(figure, chain_name)
+            parent = chain.parent_point
+
+            transforms = chain_transforms(
+                chain,
+                torso[parent],
+                orientations[parent],
+            )
+
+            positions[chain_name] = np.array(
+                [transform[:3, 3] for transform in transforms]
+            )
+
+        return positions
 
 
 def figure_link_segments(
-    figure: FigureModel,
-) -> dict[str, list[tuple[np.ndarray, np.ndarray]]]:
-    """
-    Convert joint positions into start/end line segments.
+        figure: FigureModel,
+    ) -> dict[str, list[tuple[np.ndarray, np.ndarray]]]:
+        """
+        Convert joint positions into start/end line segments.
 
-    Rendering code can later replace each line with a cylinder.
-    """
+        Rendering code can later replace each line with a cylinder.
+        """
 
-    positions = figure_joint_positions(figure)
-    segments: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
+        positions = figure_joint_positions(figure)
+        segments: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
 
-    for chain_name, joints in positions.items():
-        segments[chain_name] = [
-            (joints[index], joints[index + 1])
-            for index in range(len(joints) - 1)
-            if not np.allclose(joints[index], joints[index + 1])
-        ]
+        for chain_name, joints in positions.items():
+            segments[chain_name] = [
+                (joints[index], joints[index + 1])
+                for index in range(len(joints) - 1)
+                if not np.allclose(joints[index], joints[index + 1])
+            ]
 
-    return segments
+        return segments
 
 
 def torso_segments(
-    figure: FigureModel,
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Return the fixed torso lines used for initial rendering."""
+        figure: FigureModel,
+    ) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Return the fixed torso lines used for initial rendering."""
 
-    torso = posed_torso_points(figure)
+        torso = posed_torso_points(figure)
 
-    return [
-        (torso["left_shoulder"], torso["neck_base"]),
-        (torso["neck_base"], torso["right_shoulder"]),
-        (torso["neck_base"], torso["spine_upper"]),
-        (torso["spine_upper"], torso["spine_mid_upper"]),
-        (torso["spine_mid_upper"], torso["spine_mid_lower"]),
-        (torso["spine_mid_lower"], torso["spine_lower"]),
-        (torso["spine_lower"], torso["left_hip"]),
-        (torso["spine_lower"], torso["right_hip"]),
+        return [
+            (torso["left_shoulder"], torso["neck_base"]),
+            (torso["neck_base"], torso["right_shoulder"]),
+            (torso["neck_base"], torso["spine_upper"]),
+            (torso["spine_upper"], torso["spine_mid_upper"]),
+            (torso["spine_mid_upper"], torso["spine_mid_lower"]),
+            (torso["spine_mid_lower"], torso["spine_lower"]),
+            (torso["spine_lower"], torso["left_hip"]),
+            (torso["spine_lower"], torso["right_hip"]),
     ]
 
+
+def torso_attachment_rotations(
+        figure: FigureModel,
+    ) -> dict[str, np.ndarray]:
+        """Return orientations inherited by torso attachments."""
+
+        rotation = np.eye(3, dtype=float)
+
+        for joint_rotation in figure.spine_joints:
+            rotation = rotation @ joint_rotation
+
+        identity = np.eye(3, dtype=float)
+
+        return {
+            "neck_base": rotation,
+            "left_shoulder": rotation,
+            "right_shoulder": rotation,
+            "left_hip": identity,
+            "right_hip": identity,
+        }
 
 def posed_torso_points(figure: FigureModel) -> dict[str, np.ndarray]:
     """Apply hierarchical rotations through the spine."""
